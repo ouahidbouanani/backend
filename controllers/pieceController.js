@@ -33,25 +33,33 @@ exports.ajouterPiece = async (req, res) => {
 };
 
 exports.getAllPieces = async (req, res) => {
-    try {
-        const pieces = await prisma.piece.findMany({
-            include: {
-                cote_piece: true
-            }
-        });
+  try {
+    const pieces = await prisma.piece.findMany({
+      include: {
+        cotes: true, // ⚠️ correspond au nom du champ dans le model `piece`
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
 
-        const formattedPieces = pieces.map(piece => ({
-            id: piece.id,
-            nom: piece.nom,
-            nb_cotes: piece.nb_cotes,
-            cotes: piece.cote_piece || []
-        }));
+    const formatted = pieces.map((piece) => ({
+      id: piece.id,
+      nom: piece.nom,
+      nb_cotes: piece.nb_cotes,
+      cotes: (piece.cotes || []).map((cote) => ({
+        id: cote.id,
+        nom_cote: cote.nom_cote,
+        tolerance_min: cote.tolerance_min,
+        tolerance_max: cote.tolerance_max,
+      })),
+    }));
 
-        res.status(200).json(formattedPieces);
-    } catch (err) {
-        console.error('Erreur lors de la récupération des pièces :', err);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
+    res.status(200).json(formatted);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des pièces :", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
 };
 
 exports.getAllPiecesName = async (req, res) => {
@@ -70,30 +78,41 @@ exports.getAllPiecesName = async (req, res) => {
 };
 
 exports.getPieceById = async (req, res) => {
-    try {
-        const pieceId = parseInt(req.params.id);
+  try {
+    const pieceId = parseInt(req.params.id, 10);
 
-        const piece = await prisma.piece.findUnique({
-            where: { id: pieceId },
-            include: { cote_piece: true }
-        });
-
-        if (!piece) {
-            return res.status(404).json({ message: 'Pièce non trouvée' });
-        }
-
-        const formatted = {
-            id: piece.id,
-            nom: piece.nom,
-            nb_cotes: piece.nb_cotes,
-            cotes: piece.cote_piece || []
-        };
-
-        res.status(200).json(formatted);
-    } catch (err) {
-        console.error('Erreur lors de la récupération de la pièce :', err);
-        res.status(500).json({ message: 'Erreur serveur' });
+    if (isNaN(pieceId)) {
+      return res.status(400).json({ message: "ID invalide" });
     }
+
+    const piece = await prisma.piece.findUnique({
+      where: { id: pieceId },
+      include: {
+        cotes: true, // ⚠️ doit correspondre au nom du champ de relation dans schema.prisma
+      },
+    });
+
+    if (!piece) {
+      return res.status(404).json({ message: "Pièce non trouvée" });
+    }
+
+    const formatted = {
+      id: piece.id,
+      nom: piece.nom,
+      nb_cotes: piece.nb_cotes,
+      cotes: (piece.cotes || []).map((cote) => ({
+        id: cote.id,
+        nom_cote: cote.nom_cote,
+        tolerance_min: cote.tolerance_min,
+        tolerance_max: cote.tolerance_max,
+      })),
+    };
+
+    return res.status(200).json(formatted);
+  } catch (err) {
+    console.error("Erreur lors de la récupération de la pièce :", err);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
 };
 
 exports.deletePiece = async (req, res) => {
@@ -125,48 +144,59 @@ exports.getTypePieces = async (req, res) => {
     }
 };
 // modifier une pièce
-exports.updatePiece = (req, res) => {
-  const pieceId = req.params.nom;
-  const { nom_piece, nb_cotes, cotes } = req.body;
+exports.updatePiece = async (req, res) => {
+  try {
+    const pieceId = parseInt(req.params.id, 10);
 
-  if (!nom_piece || !nb_cotes || !Array.isArray(cotes) || cotes.length === 0) {
-    return res.status(400).json({ message: 'Champs invalides' });
-  }
-
-  const updatePieceQuery = 'UPDATE piece SET nom = ?, nb_cotes = ? ,  WHERE nom = ?';
-
-  db.query(updatePieceQuery, [nom_piece, nb_cotes, pieceId], (err) => {
-    if (err) {
-      console.error('Erreur update piece:', err);
-      return res.status(500).json({ message: 'Erreur serveur' });
+    if (isNaN(pieceId)) {
+      return res.status(400).json({ message: "ID invalide" });
     }
 
-    const deleteCotesQuery = 'DELETE FROM cote_piece WHERE piece_id = ?';
-    db.query(deleteCotesQuery, [pieceId], (err) => {
-      if (err) {
-        console.error('Erreur suppression anciens côtés:', err);
-        return res.status(500).json({ message: 'Erreur serveur' });
-      }
+    const { nom_piece, nb_cotes, cotes } = req.body;
 
-      const insertCoteQuery = `
-        INSERT INTO cote_piece (piece_id, nom_cote, tolerance_min, tolerance_max) VALUES ?
-      `;
+    if (!nom_piece || !nb_cotes || !Array.isArray(cotes) || cotes.length === 0) {
+      return res.status(400).json({ message: "Champs invalides" });
+    }
 
-      const values = cotes.map(cote => [
-        pieceId,
-        cote.nom_cote,
-        cote.tolerance_min,
-        cote.tolerance_max,
-      ]);
+    // 1️⃣ Vérifier que la pièce existe
+    const piece = await prisma.piece.findUnique({
+      where: { id: pieceId },
+    });
 
-      db.query(insertCoteQuery, [values], (err) => {
-        if (err) {
-          console.error('Erreur insertion nouveaux côtés:', err);
-          return res.status(500).json({ message: 'Erreur serveur' });
-        }
+    if (!piece) {
+      return res.status(404).json({ message: "Pièce non trouvée" });
+    }
 
-        return res.status(200).json({ message: 'Pièce mise à jour avec succès' });
+    // 2️⃣ Transaction : update pièce + reset des cotes
+    await prisma.$transaction(async (tx) => {
+      // 2.a Mettre à jour la pièce
+      await tx.piece.update({
+        where: { id: pieceId },
+        data: {
+          nom: nom_piece,
+          nb_cotes: Number(nb_cotes),
+        },
+      });
+
+      // 2.b Supprimer les anciennes cotes
+      await tx.cote_piece.deleteMany({
+        where: { piece_id: pieceId },
+      });
+
+      // 2.c Insérer les nouvelles cotes
+      await tx.cote_piece.createMany({
+        data: cotes.map((cote) => ({
+          piece_id: pieceId,
+          nom_cote: cote.nom_cote,
+          tolerance_min: cote.tolerance_min,
+          tolerance_max: cote.tolerance_max,
+        })),
       });
     });
-  });
+
+    return res.status(200).json({ message: "Pièce mise à jour avec succès" });
+  } catch (err) {
+    console.error("Erreur update pièce:", err);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
 };

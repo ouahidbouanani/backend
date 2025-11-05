@@ -24,11 +24,14 @@ model assemblage {
 }
 
 model cote_piece {
-  id             Int     @id @default(autoincrement())
+  id             Int      @id @default(autoincrement())
   piece_id       Int?
-  nom_cote       String? @db.VarChar(255)
+  nom_cote       String?  @db.VarChar(255)
   tolerance_min  Int?
   tolerance_max  Int?
+
+  // 👇 Relation inverse vers piece
+  piece          piece?   @relation(fields: [piece_id], references: [id])
 
   @@index([piece_id], map: "piece_id")
 }
@@ -181,9 +184,10 @@ model nouvelle_impression {
 }
 
 model piece {
-  id        Int    @id @default(autoincrement())
-  nom       String @unique @db.VarChar(100)
+  id        Int          @id @default(autoincrement())
+  nom       String       @unique @db.VarChar(100)
   nb_cotes  Int
+  cotes     cote_piece[] 
 }
 
 model prise_de_cotes {
